@@ -232,6 +232,12 @@ local function repo_update_handler(bufnr)
 
   local git_obj = bcache.git_obj
 
+  -- Git repos update abbrev_head synchronously in their watcher callback.
+  -- Arc repos need an async subprocess call, so refresh here before reading.
+  if git_obj.repo.refresh_head then
+    git_obj.repo:refresh_head()
+  end
+
   Status.update(bufnr, { head = git_obj.repo.abbrev_head })
 
   local was_tracked = git_obj.object_name ~= nil

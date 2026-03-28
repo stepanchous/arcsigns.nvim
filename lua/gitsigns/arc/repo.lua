@@ -130,19 +130,22 @@ function M._new(toplevel, head_info)
   if config.watch_gitdir.enable and Path.is_dir(self.gitdir) then
     local Watcher = require('gitsigns.git.repo.watcher')
     self._watcher = Watcher.new(self.gitdir)
-    self._watcher:on_update(function()
-      -- Update head info when .arc changes (checkout, pull, etc.)
-      async.run(function()
-        local new_info = fetch_arc_info(toplevel)
-        if new_info then
-          self.abbrev_head = new_info.abbrev_head
-          self.head_oid = new_info.head_oid
-        end
-      end)
-    end)
   end
 
   return self
+end
+
+--- Fetch fresh branch/HEAD info from arc.
+--- Git repos do this synchronously in their watcher callback, but arc needs
+--- to spawn a subprocess, so the buffer update handler must await this before
+--- reading abbrev_head.
+--- @async
+function M:refresh_head()
+  local new_info = fetch_arc_info(self.toplevel)
+  if new_info then
+    self.abbrev_head = new_info.abbrev_head
+    self.head_oid = new_info.head_oid
+  end
 end
 
 --- Run arc command from the repository root.
