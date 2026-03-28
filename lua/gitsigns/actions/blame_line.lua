@@ -95,9 +95,8 @@ end
 --- @param result Gitsigns.BlameInfoPublic
 --- @param repo Gitsigns.Repo
 --- @param fileformat string
---- @param with_gh boolean
 --- @return Gitsigns.LineSpec[]
-local function create_blame_linespec(full, result, repo, fileformat, with_gh)
+local function create_blame_linespec(full, result, repo, fileformat)
   local is_committed = result.sha and tonumber('0x' .. result.sha) ~= 0
 
   if not is_committed then
@@ -106,22 +105,11 @@ local function create_blame_linespec(full, result, repo, fileformat, with_gh)
     }
   end
 
-  local gh --- @module 'gitsigns.gh'?
-  if config.gh and with_gh then
-    gh = require('gitsigns.gh')
-  end
-
-  local commit_url = gh and gh.commit_url(result.sha, repo.toplevel) or nil
-
   --- @type Gitsigns.LineSpec
   local title = {
-    { result.abbrev_sha, 'Directory', commit_url },
+    { result.abbrev_sha, 'Directory' },
     { ' ', 'NormalFloat' },
   }
-
-  if gh then
-    vim.list_extend(title, gh.create_pr_linespec(result.sha, repo.toplevel))
-  end
 
   vim.list_extend(title, {
     { result.author .. ' ', 'MoreMsg' },
@@ -190,21 +178,11 @@ return function(opts)
   local result = util.convert_blame_info(assert(info))
 
   local blame_linespec =
-    create_blame_linespec(opts.full, result, bcache.git_obj.repo, fileformat, false)
+    create_blame_linespec(opts.full, result, bcache.git_obj.repo, fileformat)
 
   if is_stale() then
     return
   end
 
   popup_winid, popup_bufnr = popup.create(blame_linespec, config.preview_config, 'blame')
-
-  blame_linespec = create_blame_linespec(opts.full, result, bcache.git_obj.repo, fileformat, true)
-
-  if is_stale() then
-    return
-  end
-
-  if api.nvim_win_is_valid(popup_winid) and api.nvim_buf_is_valid(popup_bufnr) then
-    popup.update(popup_winid, popup_bufnr, blame_linespec, config.preview_config)
-  end
 end

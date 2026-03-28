@@ -1,7 +1,6 @@
 local async = require('gitsigns.async')
 local Hunks = require('gitsigns.hunks')
 local cache = require('gitsigns.cache').cache
-local Popup = require('gitsigns.popup')
 
 local api = vim.api
 
@@ -19,9 +18,6 @@ local api = vim.api
 --- Only navigate between non-contiguous hunks. Only useful if
 --- 'diff_opts' contains `linematch`. Defaults to `true`.
 --- @field greedy boolean
---- Automatically open preview_hunk() upon navigating
---- to a hunk.
---- @field preview? boolean
 --- Number of times to advance. Defaults to |v:count1|.
 --- @field count integer
 --- Which kinds of hunks to target. Defaults to `'unstaged'`.
@@ -42,12 +38,10 @@ end
 local function process_nav_opts(opts)
   opts = opts or {}
 
-  -- show navigation message
   if opts.navigation_message == nil then
     opts.navigation_message = vim.o.shortmess:find('S') == nil
   end
 
-  -- wrap around
   if opts.wrap == nil then
     opts.wrap = vim.o.wrapscan
   end
@@ -140,9 +134,6 @@ function M.nav_hunk(direction, opts)
     line = forwards and hunk.added.start or hunk.vend
   end
 
-  -- Check if preview popup is open before moving the cursor
-  local should_preview = opts.preview or Popup.is_open('hunk') ~= nil
-
   -- Handle topdelete
   line = math.max(line, 1)
 
@@ -156,20 +147,7 @@ function M.nav_hunk(direction, opts)
     vim.cmd('silent! foldopen!')
   end
 
-  -- schedule so the cursor change can settle, otherwise the popup might
-  -- appear in the old position
   async.schedule()
-
-  local Preview = require('gitsigns.actions.preview')
-
-  if should_preview then
-    -- Close the popup in case one is open which will cause it to focus the
-    -- popup
-    Popup.close('hunk')
-    Preview.preview_hunk()
-  elseif Preview.has_preview_inline(bufnr) then
-    Preview.preview_hunk_inline()
-  end
 
   if index and opts.navigation_message then
     api.nvim_echo({ { ('Hunk %d of %d'):format(index, #hunks), 'None' } }, false, {})

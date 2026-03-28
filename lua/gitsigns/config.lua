@@ -8,13 +8,6 @@
 --- @field default_help? string
 --- @field description string
 
---- @class (exact) Gitsigns.DiffthisOpts
----
---- Split window vertically. Default to `config.diff_opts.vertical`. If running
---- via command line, then shi is taken from the command modifiers.
---- @field vertical? boolean
---- @field split? 'aboveleft'|'belowright'|'topleft'|'botright'
-
 --- @class (exact) Gitsigns.DiffOpts
 --- @field algorithm 'myers'|'minimal'|'patience'|'histogram'
 --- @field internal boolean
@@ -57,7 +50,6 @@
 --- @field package _config table<string,any> config store
 --- @field debug_mode boolean
 --- @field diff_opts Gitsigns.DiffOpts
---- @field diffthis Gitsigns.DiffthisOpts
 --- @field base? string
 --- @field signs table<Gitsigns.SignType,Gitsigns.SignConfig>
 --- @field signs_staged table<Gitsigns.SignType,Gitsigns.SignConfig>
@@ -84,8 +76,6 @@
 --- @field attach_to_untracked boolean
 --- @field worktrees {toplevel: string, gitdir: string}[]
 --- @field word_diff boolean
---- @field trouble boolean
---- @field gh boolean
 --- -- Undocumented
 --- @field _refresh_staged_on_update boolean
 --- @field _threaded_diff boolean
@@ -487,16 +477,6 @@ M.schema = {
     ]],
   },
 
-  diffthis = {
-    type = 'table',
-    default = {
-      split = 'aboveleft',
-    },
-    description = [[
-      Options for the `:Gitsigns diffthis` command.
-    ]],
-  },
-
   base = {
     type = 'string',
     default_help = 'index',
@@ -742,28 +722,6 @@ M.schema = {
       |gitsigns-config-current_line_blame| for lines that aren't committed.
 
       See |gitsigns-config-current_line_blame_formatter| for more information.
-    ]],
-  },
-
-  trouble = {
-    type = 'boolean',
-    default = function()
-      local has_trouble = pcall(require, 'trouble')
-      return has_trouble
-    end,
-    default_help = 'true if installed',
-    description = [[
-      When using setqflist() or setloclist(), open Trouble instead of the
-      quickfix/location list window.
-    ]],
-  },
-
-  gh = {
-    type = 'boolean',
-    default = false,
-    description = [[
-      Enable GitHub integration. This allows the following features:
-      • `:Gitsigns blame_line` will show PR numbers (with a hyperlink)
     ]],
   },
 

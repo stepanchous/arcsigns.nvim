@@ -194,10 +194,7 @@ local function reblame(opts, blame, win, revision, parent)
   vim.cmd.quit()
   api.nvim_set_current_win(win)
 
-  local did_attach = require('gitsigns.actions.diffthis').show(nil, sha)
-  if not did_attach then
-    return
-  end
+  require('gitsigns.actions').change_base(sha)
 
   local src_buf = api.nvim_win_get_buf(win)
   local line_count = api.nvim_buf_line_count(src_buf)
@@ -208,18 +205,6 @@ local function reblame(opts, blame, win, revision, parent)
   M.blame(opts)
 end
 
---- @async
---- @param win integer
---- @param bwin integer
---- @param open 'vsplit'|'tabnew'
---- @param bcache Gitsigns.CacheEntry
-local function show_commit(win, bwin, open, bcache)
-  local cursor = api.nvim_win_get_cursor(bwin)[1]
-  local blame = assert(bcache.blame)
-  local sha = assert(blame.entries[cursor]).commit.sha
-  api.nvim_set_current_win(win)
-  require('gitsigns.actions.show_commit')(sha, open)
-end
 
 --- @param augroup integer
 --- @param wins integer[]
@@ -315,20 +300,6 @@ local function on_cursor_moved(bufnr, blm_win, blame, commit_lines)
   end
 end
 
---- @async
---- @param bufnr integer
---- @param blm_win integer
---- @param blame table<integer,Gitsigns.BlameInfo?>
-local function diff(bufnr, blm_win, blame)
-  local lnum = api.nvim_win_get_cursor(blm_win)[1]
-  local info = assert(blame[lnum])
-
-  vim.cmd('tab sbuffer ' .. bufnr)
-  require('gitsigns.actions.diffthis').show(bufnr, info.commit.sha, info.filename)
-  if info.previous_sha then
-    require('gitsigns.actions').diffthis(info.previous_sha)
-  end
-end
 
 --- Update the right-side extmarks when the window is resized
 --- @param blm_bufnr integer
@@ -460,13 +431,6 @@ function M.blame(opts)
     buffer = blm_bufnr,
   })
 
-  pmap('n', 'd', function()
-    async.run(diff, bufnr, blm_win, blame.entries):raise_on_error()
-  end, {
-    desc = 'Diff (tab)',
-    buffer = blm_bufnr,
-  })
-
   pmap('n', 'R', function()
     async.run(reblame, opts, blame.entries, win, bcache.git_obj.revision, true):raise_on_error()
   end, {
@@ -474,26 +438,9 @@ function M.blame(opts)
     buffer = blm_bufnr,
   })
 
-  pmap('n', 's', function()
-    async.run(show_commit, win, blm_win, 'vsplit', bcache):raise_on_error()
-  end, {
-    desc = 'Show commit in a vertical split',
-    buffer = blm_bufnr,
-  })
-
-  pmap('n', 'S', function()
-    async.run(show_commit, win, blm_win, 'tabnew', bcache):raise_on_error()
-  end, {
-    desc = 'Show commit in a new tab',
-    buffer = blm_bufnr,
-  })
-
   menu('GitsignsBlame', {
     { 'Reblame at commit', 'r' },
     { 'Reblame at commit parent', 'R' },
-    { 'Diff (tab)', 'd' },
-    { 'Show commit (vsplit)', 's' },
-    { '            (tab)', 'S' },
   })
 
   local group = api.nvim_create_augroup('GitsignsBlame', {})

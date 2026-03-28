@@ -518,6 +518,16 @@ function M.get(cwd, gitdir, toplevel)
   return sem:with(function()
     local info, err = M.get_info(cwd, gitdir, toplevel)
     if not info then
+      -- Git repo not found; try arc before giving up.
+      -- Only attempt arc detection when no explicit gitdir/toplevel was given,
+      -- since those imply the caller already knows it's a git repo.
+      if not gitdir and not toplevel then
+        local arc_repo, arc_err = require('gitsigns.arc.repo').get(cwd)
+        if arc_repo then
+          return arc_repo
+        end
+        log.dprintf('arc detection failed: %s', arc_err)
+      end
       return nil, err
     end
 

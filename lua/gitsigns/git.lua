@@ -109,23 +109,6 @@ function Obj:get_show_text(revision, relpath)
   return stdout, stderr
 end
 
---- @param file string
-local function autocmd_changed(file)
-  vim.schedule(function()
-    vim.api.nvim_exec_autocmds('User', {
-      pattern = 'GitSignsChanged',
-      modeline = false,
-      data = { file = file },
-    })
-  end)
-end
-
---- @async
-function Obj:unstage_file()
-  self.repo:command({ 'reset', self.file })
-  autocmd_changed(self.file)
-end
-
 --- @async
 --- @param contents? string[]
 --- @param lnum? integer|[integer, integer]
@@ -134,80 +117,10 @@ end
 --- @return table<integer,Gitsigns.BlameInfo?>
 --- @return table<string,Gitsigns.CommitInfo?>
 function Obj:run_blame(contents, lnum, revision, opts)
+  if self.repo.vcs_type == 'arc' then
+    return require('gitsigns.arc.blame').run_blame(self, contents, lnum, revision, opts)
+  end
   return require('gitsigns.git.blame').run_blame(self, contents, lnum, revision, opts)
-end
-
---- @async
---- @private
-function Obj:ensure_file_in_index()
-  if self.object_name and not self.has_conflicts then
-    return
-  end
-
-  if not self.object_name then
-    -- If there is no object_name then it is not yet in the index so add it
-    self.repo:command({ 'add', '--intent-to-add', self.file })
-  else
-    -- Update the index with the common ancestor (stage 1) which is what bcache
-    -- stores
-    self.repo:update_index(self.mode_bits, self.object_name, assert(self.relpath), true)
-  end
-
-  self:refresh()
-end
-
---- @async
---- Stage 'lines' as the entire contents of the file
---- @param lines string[]
-function Obj:stage_lines(lines)
-  local relpath = assert(self.relpath)
-  local new_object = self.repo:hash_object(relpath, lines)
-  self.repo:update_index(self.mode_bits, new_object, relpath)
-  autocmd_changed(self.file)
-end
-
-local sleep = async.wrap(2, function(duration, cb)
-  vim.defer_fn(cb, duration)
-end)
-
---- @async
---- @param hunks Gitsigns.Hunk.Hunk[]
---- @param invert? boolean
---- @return string? err
-function Obj:stage_hunks(hunks, invert)
-  self:ensure_file_in_index()
-
-  local relpath = assert(self.relpath)
-  local patch = require('gitsigns.hunks').create_patch(relpath, hunks, self.mode_bits, invert)
-
-  if not self.i_crlf and self.w_crlf then
-    -- Remove cr
-    for i, p in ipairs(patch) do
-      patch[i] = p:gsub('\r$', '')
-    end
-  end
-
-  local stat, err = pcall(function()
-    self.repo:command({
-      'apply',
-      '--whitespace=nowarn',
-      '--cached',
-      '--unidiff-zero',
-      '-',
-    }, {
-      stdin = patch,
-    })
-  end)
-
-  if not stat then
-    return err
-  end
-
-  -- Staging operations cause IO of the git directory so wait some time
-  -- for the changes to settle.
-  sleep(100)
-
-  autocmd_changed(self.file)
 end
 
 --- @async

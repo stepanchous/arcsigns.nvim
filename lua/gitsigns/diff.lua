@@ -14,9 +14,5 @@ return function(a, b, linematch)
   --   return { hunk }
   -- end
 
-  if config.diff_opts.internal then
-    return require('gitsigns.diff_int').run_diff(a, b, linematch)
-  else
-    return require('gitsigns.diff_ext').run_diff(a, b)
-  end
+  return require('gitsigns.diff_int').run_diff(a, b, linematch)
 end
