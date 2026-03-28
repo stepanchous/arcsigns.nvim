@@ -11,7 +11,7 @@ local Path = util.Path
 --- @field abbrev_head string  Current branch name
 --- @field head_oid? string    HEAD commit hash
 --- @field username string     Arc user login
---- @field detached boolean    Always false for arc
+--- @field detached boolean
 --- @field vcs_type 'arc'
 --- @field private _lock Gitsigns.async.Semaphore
 --- @field private _watcher? Gitsigns.Repo.Watcher
@@ -19,6 +19,73 @@ local M = {}
 M.__index = M
 
 M.vcs_type = 'arc'
+
+--- Read the full contents of a small file, or nil on failure.
+--- @param path string
+--- @return string?
+local function read_file(path)
+  local f = io.open(path, 'r')
+  if not f then
+    return nil
+  end
+  local content = f:read('*a')
+  f:close()
+  return content
+end
+
+--- Parse arc's text-protobuf ref file (.arc/HEAD, .arc/refs/heads/<branch>).
+--- Returns (symbolic, id) — at most one is non-nil.
+--- @param content string
+--- @return string? symbolic Branch name (when HEAD points to a branch)
+--- @return string? id       Commit hash (when detached or reading a branch ref)
+local function parse_arc_ref(content)
+  local symbolic = content:match('Symbolic:%s*"([^"]*)"')
+  local id = content:match('Id:%s*"([^"]*)"')
+  return symbolic, id
+end
+
+--- Synchronously read .arc/HEAD and return the branch name (or short hash).
+--- Mirrors git's read_head + get_abbrev_head pattern.
+--- @param gitdir string Path to .arc directory
+--- @return string? abbrev_head
+--- @return boolean detached
+local function read_arc_head(gitdir)
+  local content = read_file(Path.join(gitdir, 'HEAD'))
+  if not content then
+    return nil, false
+  end
+  local symbolic, id = parse_arc_ref(content)
+  if symbolic and symbolic ~= '' then
+    return symbolic, false
+  end
+  if id and id ~= '' then
+    return id:sub(1, 7), true
+  end
+  return nil, false
+end
+
+--- Synchronously resolve the HEAD commit hash from arc ref files.
+--- If HEAD is symbolic (on a branch), reads .arc/refs/heads/<branch>.
+--- @param gitdir string
+--- @return string? oid
+local function get_arc_head_oid(gitdir)
+  local content = read_file(Path.join(gitdir, 'HEAD'))
+  if not content then
+    return nil
+  end
+  local symbolic, id = parse_arc_ref(content)
+  if id and id ~= '' then
+    return id
+  end
+  if symbolic and symbolic ~= '' then
+    local ref_content = read_file(Path.join(gitdir, 'refs', 'heads', symbolic))
+    if ref_content then
+      local _, ref_id = parse_arc_ref(ref_content)
+      return ref_id
+    end
+  end
+  return nil
+end
 
 --- Walk up from dir looking for .arcadia.root, return containing directory.
 --- @param dir string
@@ -42,9 +109,11 @@ local repo_cache = setmetatable({}, { __mode = 'v' })
 
 local sem = async.semaphore(1)
 
+--- Fetch full repo info via `arc info --json`. Used only for initial repo
+--- discovery (to validate the repo and obtain the username).
 --- @async
 --- @param toplevel string
---- @return {abbrev_head:string, head_oid:string, username:string}? info
+--- @return {abbrev_head:string, head_oid:string, username:string, detached:boolean}? info
 --- @return string? err
 local function fetch_arc_info(toplevel)
   local stdout, stderr, code = arc_command({ 'info', '--json' }, {
@@ -63,8 +132,8 @@ local function fetch_arc_info(toplevel)
   end
 
   local abbrev_head = arc_info.branch or ''
-  -- When on trunk or detached, use short hash
-  if abbrev_head == '' and arc_info.hash then
+  local detached = abbrev_head == ''
+  if detached and arc_info.hash then
     abbrev_head = arc_info.hash:sub(1, 7)
   end
 
@@ -72,6 +141,7 @@ local function fetch_arc_info(toplevel)
     abbrev_head = abbrev_head,
     head_oid = arc_info.hash or '',
     username = arc_info.user_login or arc_info.author or '',
+    detached = detached,
   }
 end
 
@@ -92,16 +162,24 @@ function M.get(cwd)
       return nil, 'not in arc repository'
     end
 
-    local head_info, err = fetch_arc_info(toplevel)
-    if not head_info then
-      return nil, err
-    end
+    local gitdir = Path.join(toplevel, '.arc')
 
     local cached = repo_cache[toplevel]
     if cached then
-      cached.abbrev_head = head_info.abbrev_head
-      cached.head_oid = head_info.head_oid
+      -- Fast path: read HEAD from disk instead of spawning `arc info`.
+      local abbrev_head, detached = read_arc_head(gitdir)
+      if abbrev_head then
+        cached.abbrev_head = abbrev_head
+        cached.detached = detached
+      end
+      cached.head_oid = get_arc_head_oid(gitdir) or cached.head_oid
       return cached
+    end
+
+    -- First time: run `arc info --json` to validate repo and get username.
+    local head_info, err = fetch_arc_info(toplevel)
+    if not head_info then
+      return nil, err
     end
 
     local repo = M._new(toplevel, head_info)
@@ -122,30 +200,29 @@ function M._new(toplevel, head_info)
   self.abbrev_head = head_info.abbrev_head
   self.head_oid = head_info.head_oid
   self.username = head_info.username
-  self.detached = false
+  self.detached = head_info.detached or false
   self._lock = async.semaphore(1)
 
-  -- Set up watcher on .arc dir (same mechanism as git watcher on .git)
+  -- Set up watcher on .arc dir (same mechanism as git watcher on .git).
+  -- The on_update callback reads .arc/HEAD synchronously from disk, just
+  -- like the git watcher reads .git/HEAD — no subprocess needed.
   local config = require('gitsigns.config').config
   if config.watch_gitdir.enable and Path.is_dir(self.gitdir) then
     local Watcher = require('gitsigns.git.repo.watcher')
     self._watcher = Watcher.new(self.gitdir)
+    self._watcher:on_update(function()
+      self.head_oid = get_arc_head_oid(self.gitdir)
+      local abbrev_head, detached = read_arc_head(self.gitdir)
+      abbrev_head = abbrev_head or ''
+      if self.abbrev_head ~= abbrev_head then
+        self.abbrev_head = abbrev_head
+        self.detached = detached
+        log.dprintf('HEAD changed, updating abbrev_head to %s', self.abbrev_head)
+      end
+    end)
   end
 
   return self
-end
-
---- Fetch fresh branch/HEAD info from arc.
---- Git repos do this synchronously in their watcher callback, but arc needs
---- to spawn a subprocess, so the buffer update handler must await this before
---- reading abbrev_head.
---- @async
-function M:refresh_head()
-  local new_info = fetch_arc_info(self.toplevel)
-  if new_info then
-    self.abbrev_head = new_info.abbrev_head
-    self.head_oid = new_info.head_oid
-  end
 end
 
 --- Run arc command from the repository root.

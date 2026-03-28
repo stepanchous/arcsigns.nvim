@@ -120,38 +120,6 @@ local setup = Util.once(function()
     group = 'gitsigns',
     callback = M.detach_all,
   })
-
-  -- Arc repos can't reliably detect branch changes via filesystem watchers
-  -- (arc's internal directory structure differs from git's). Refresh on
-  -- FocusGained so that returning to Neovim after a checkout picks up the
-  -- new branch.
-  --
-  -- Note: repo_update_handler is declared later in this file, so we inline
-  -- the essential refresh logic here to avoid referencing an undefined local.
-  api.nvim_create_autocmd('FocusGained', {
-    group = 'gitsigns',
-    desc = 'Gitsigns: refresh arc repos on focus',
-    callback = function()
-      for bufnr, bcache in pairs(cache) do
-        local repo = bcache.git_obj.repo
-        if repo.refresh_head then
-          async.run(function()
-            local old_head_oid = repo.head_oid
-            repo:refresh_head()
-            if not api.nvim_buf_is_valid(bufnr) then
-              return
-            end
-            Status.update(bufnr, { head = repo.abbrev_head })
-            if repo.head_oid ~= old_head_oid then
-              bcache:invalidate(true)
-              bcache.head_oid = repo.head_oid
-              manager.update(bufnr)
-            end
-          end)
-        end
-      end
-    end,
-  })
 end)
 
 --- @class (exact) Gitsigns.GitContext
@@ -263,12 +231,6 @@ local function repo_update_handler(bufnr)
   dprintf('Watcher handler called for buffer %d %s', bufnr, bcache.file)
 
   local git_obj = bcache.git_obj
-
-  -- Git repos update abbrev_head synchronously in their watcher callback.
-  -- Arc repos need an async subprocess call, so refresh here before reading.
-  if git_obj.repo.refresh_head then
-    git_obj.repo:refresh_head()
-  end
 
   Status.update(bufnr, { head = git_obj.repo.abbrev_head })
 
