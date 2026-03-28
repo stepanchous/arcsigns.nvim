@@ -120,6 +120,24 @@ local setup = Util.once(function()
     group = 'gitsigns',
     callback = M.detach_all,
   })
+
+  -- Arc repos can't reliably detect branch changes via filesystem watchers
+  -- (arc's internal directory structure differs from git's). Refresh on
+  -- FocusGained so that returning to Neovim after a checkout picks up the
+  -- new branch.
+  api.nvim_create_autocmd('FocusGained', {
+    group = 'gitsigns',
+    desc = 'Gitsigns: refresh arc repos on focus',
+    callback = function()
+      for bufnr, bcache in pairs(cache) do
+        if bcache.git_obj.repo.refresh_head then
+          async.run(function()
+            repo_update_handler(bufnr)
+          end)
+        end
+      end
+    end,
+  })
 end)
 
 --- @class (exact) Gitsigns.GitContext
