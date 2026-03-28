@@ -125,14 +125,28 @@ local setup = Util.once(function()
   -- (arc's internal directory structure differs from git's). Refresh on
   -- FocusGained so that returning to Neovim after a checkout picks up the
   -- new branch.
+  --
+  -- Note: repo_update_handler is declared later in this file, so we inline
+  -- the essential refresh logic here to avoid referencing an undefined local.
   api.nvim_create_autocmd('FocusGained', {
     group = 'gitsigns',
     desc = 'Gitsigns: refresh arc repos on focus',
     callback = function()
       for bufnr, bcache in pairs(cache) do
-        if bcache.git_obj.repo.refresh_head then
+        local repo = bcache.git_obj.repo
+        if repo.refresh_head then
           async.run(function()
-            repo_update_handler(bufnr)
+            local old_head_oid = repo.head_oid
+            repo:refresh_head()
+            if not api.nvim_buf_is_valid(bufnr) then
+              return
+            end
+            Status.update(bufnr, { head = repo.abbrev_head })
+            if repo.head_oid ~= old_head_oid then
+              bcache:invalidate(true)
+              bcache.head_oid = repo.head_oid
+              manager.update(bufnr)
+            end
           end)
         end
       end
