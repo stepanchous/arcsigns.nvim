@@ -3,3 +3,5 @@ doc/tags
 deps
 emydoc/
 .nvimlog
+.cursor/
+.cluade/
